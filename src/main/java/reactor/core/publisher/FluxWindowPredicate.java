@@ -31,6 +31,8 @@ import reactor.core.Exceptions;
 import reactor.core.Fuseable;
 import reactor.core.Scannable;
 import reactor.core.publisher.FluxBufferPredicate.Mode;
+import reactor.util.context.Context;
+import reactor.util.context.ContextRelay;
 
 
 
@@ -51,7 +53,7 @@ import reactor.core.publisher.FluxBufferPredicate.Mode;
  *
  * @see <a href="https://github.com/reactor/reactive-streams-commons">Reactive-Streams-Commons</a>
  */
-final class FluxWindowPredicate<T> extends FluxSource<T, GroupedFlux<T, T>>
+final class FluxWindowPredicate<T> extends FluxOperator<T, GroupedFlux<T, T>>
 		implements Fuseable{
 
 	final Supplier<? extends Queue<T>> groupQueueSupplier;
@@ -84,13 +86,13 @@ final class FluxWindowPredicate<T> extends FluxSource<T, GroupedFlux<T, T>>
 	}
 
 	@Override
-	public void subscribe(Subscriber<? super GroupedFlux<T, T>> s) {
+	public void subscribe(Subscriber<? super GroupedFlux<T, T>> s, Context ctx) {
 		source.subscribe(new WindowPredicateMain<>(s,
 				mainQueueSupplier.get(),
 				groupQueueSupplier,
 				prefetch,
 				predicate,
-				mode));
+				mode, ctx), ctx);
 	}
 
 	@Override
@@ -115,6 +117,8 @@ final class FluxWindowPredicate<T> extends FluxSource<T, GroupedFlux<T, T>>
 		final Queue<GroupedFlux<T, T>> queue;
 
 		WindowGroupedFlux<T> window;
+
+		Context context;
 
 		volatile int wip;
 		@SuppressWarnings("rawtypes")
@@ -154,7 +158,8 @@ final class FluxWindowPredicate<T> extends FluxSource<T, GroupedFlux<T, T>>
 				Supplier<? extends Queue<T>> groupQueueSupplier,
 				int prefetch,
 				Predicate<? super T> predicate,
-				Mode mode) {
+				Mode mode,
+				Context ctx) {
 			this.actual = actual;
 			this.queue = queue;
 			this.groupQueueSupplier = groupQueueSupplier;
@@ -162,7 +167,7 @@ final class FluxWindowPredicate<T> extends FluxSource<T, GroupedFlux<T, T>>
 			this.predicate = predicate;
 			this.mode = mode;
 			WINDOW_COUNT.lazySet(this, 2);
-
+			this.context = ctx;
 			initializeWindow();
 		}
 
@@ -185,7 +190,8 @@ final class FluxWindowPredicate<T> extends FluxSource<T, GroupedFlux<T, T>>
 		void initializeWindow() {
 			WindowGroupedFlux<T> g = new WindowGroupedFlux<>(null,
 					groupQueueSupplier.get(),
-					this);
+					this,
+					context);
 			window = g;
 			queue.offer(g);
 		}
@@ -195,7 +201,8 @@ final class FluxWindowPredicate<T> extends FluxSource<T, GroupedFlux<T, T>>
 			if (cancelled == 0) {
 				WINDOW_COUNT.getAndIncrement(this);
 
-				WindowGroupedFlux<T> g = new WindowGroupedFlux<>(key, groupQueueSupplier.get(), this);
+				WindowGroupedFlux<T> g = new WindowGroupedFlux<>(key,
+						groupQueueSupplier.get(), this, ctx);
 				if (emitInNewWindow != null) {
 					g.onNext(emitInNewWindow);
 				}
@@ -296,7 +303,7 @@ final class FluxWindowPredicate<T> extends FluxSource<T, GroupedFlux<T, T>>
 
 		@Override
 		public Stream<? extends Scannable> inners() {
-			return window == null ? Stream.empty() : Stream.of(window);
+			return Stream.of(window);
 		}
 
 		@Override
@@ -524,6 +531,8 @@ final class FluxWindowPredicate<T> extends FluxSource<T, GroupedFlux<T, T>>
 
 		final Queue<T> queue;
 
+		final Context context;
+
 		volatile WindowPredicateMain<T> parent;
 		@SuppressWarnings("rawtypes")
 		static final AtomicReferenceFieldUpdater<WindowGroupedFlux, WindowPredicateMain>
@@ -564,9 +573,10 @@ final class FluxWindowPredicate<T> extends FluxSource<T, GroupedFlux<T, T>>
 
 		WindowGroupedFlux(T key,
 				Queue<T> queue,
-				WindowPredicateMain<T> parent) {
+				WindowPredicateMain<T> parent,
+				Context ctx) {
 			this.key = key;
-
+			this.context = ctx;
 			this.queue = queue;
 			this.parent = parent;
 		}
@@ -757,8 +767,9 @@ final class FluxWindowPredicate<T> extends FluxSource<T, GroupedFlux<T, T>>
 		}
 
 		@Override
-		public void subscribe(Subscriber<? super T> s) {
+		public void subscribe(Subscriber<? super T> s, Context ctx) {
 			if (once == 0 && ONCE.compareAndSet(this, 0, 1)) {
+				ContextRelay.set(s, context);
 				s.onSubscribe(this);
 				ACTUAL.lazySet(this, s);
 				drain();
