@@ -202,7 +202,7 @@ final class FluxWindowPredicate<T> extends FluxOperator<T, GroupedFlux<T, T>>
 				WINDOW_COUNT.getAndIncrement(this);
 
 				WindowGroupedFlux<T> g = new WindowGroupedFlux<>(key,
-						groupQueueSupplier.get(), this, ctx);
+						groupQueueSupplier.get(), this, context);
 				if (emitInNewWindow != null) {
 					g.onNext(emitInNewWindow);
 				}
