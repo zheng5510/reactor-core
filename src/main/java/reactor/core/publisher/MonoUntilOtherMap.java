@@ -28,16 +28,16 @@ import org.reactivestreams.Subscription;
 import reactor.core.Scannable;
 
 /**
- * Waits for a Mono source to produce a value or terminate, as well as a Publisher source
- * for which first production or termination will be used as a trigger. If the Mono source
- * produced a value, emit that value after the Mono has completed and the Publisher source
- * has either emitted once or completed. Otherwise terminate empty.
+ * Waits for a Mono source to terminate or produce a value, in which case the value is
+ * mapped to a Publisher used as a delay: its first production or termination will trigger
+ * the actual emission of the value downstream. If the Mono source didn't produce a value,
+ * terminate with the same signal (empty completion or error).
  *
  * @param <T> the value type
  *
  * @author Simon Baslé
  */
-final class MonoUntilOtherFrom<T> extends Mono<T> {
+final class MonoUntilOtherMap<T> extends Mono<T> {
 
 	final boolean delayError;
 
@@ -45,7 +45,7 @@ final class MonoUntilOtherFrom<T> extends Mono<T> {
 
 	Function<? super T, ? extends Publisher<?>>[] otherGenerators;
 
-	MonoUntilOtherFrom(boolean delayError,
+	MonoUntilOtherMap(boolean delayError,
 			Mono<T> monoSource,
 			Function<? super T, ? extends Publisher<?>> triggerGenerator) {
 		this.delayError = delayError;
@@ -53,7 +53,7 @@ final class MonoUntilOtherFrom<T> extends Mono<T> {
 		this.otherGenerators = new Function[] { Objects.requireNonNull(triggerGenerator, "triggerGenerator")};
 	}
 
-	private MonoUntilOtherFrom(boolean delayError,
+	private MonoUntilOtherMap(boolean delayError,
 			Mono<T> monoSource,
 			Function<? super T, ? extends Publisher<?>>[] triggerGenerators) {
 		this.delayError = delayError;
@@ -64,26 +64,26 @@ final class MonoUntilOtherFrom<T> extends Mono<T> {
 	/**
 	 * Add a trigger generator to wait for.
 	 * @param triggerGenerator
-	 * @return a new {@link MonoUntilOtherFrom} instance with same source but additional trigger generator
+	 * @return a new {@link MonoUntilOtherMap} instance with same source but additional trigger generator
 	 */
-	MonoUntilOtherFrom<T> addTriggerGenerator(Function<? super T, ? extends Publisher<?>> triggerGenerator) {
+	MonoUntilOtherMap<T> addTriggerGenerator(Function<? super T, ? extends Publisher<?>> triggerGenerator) {
 		Objects.requireNonNull(triggerGenerator, "triggerGenerator");
 		Function<? super T, ? extends Publisher<?>>[] oldTriggers = this.otherGenerators;
 		Function<? super T, ? extends Publisher<?>>[] newTriggers = new Function[oldTriggers.length + 1];
 		System.arraycopy(oldTriggers, 0, newTriggers, 0, oldTriggers.length);
 		newTriggers[oldTriggers.length] = triggerGenerator;
-		return new MonoUntilOtherFrom<T>(this.delayError, this.source, newTriggers);
+		return new MonoUntilOtherMap<T>(this.delayError, this.source, newTriggers);
 	}
 
 	@Override
 	public void subscribe(Subscriber<? super T> s) {
-		UntilOtherFromCoordinator<T> parent = new UntilOtherFromCoordinator<>(s,
+		UntilOtherMapCoordinator<T> parent = new UntilOtherMapCoordinator<>(s,
 				delayError, otherGenerators);
 		s.onSubscribe(parent);
 		source.subscribe(parent);
 	}
 
-	static final class UntilOtherFromCoordinator<T>
+	static final class UntilOtherMapCoordinator<T>
 			extends Operators.MonoSubscriber<T, T> {
 
 		final int                                           n;
@@ -91,17 +91,17 @@ final class MonoUntilOtherFrom<T> extends Mono<T> {
 		final Function<? super T, ? extends Publisher<?>>[] otherGenerators;
 
 		volatile int done;
-		static final AtomicIntegerFieldUpdater<UntilOtherFromCoordinator> DONE =
-				AtomicIntegerFieldUpdater.newUpdater(UntilOtherFromCoordinator.class, "done");
+		static final AtomicIntegerFieldUpdater<UntilOtherMapCoordinator> DONE =
+				AtomicIntegerFieldUpdater.newUpdater(UntilOtherMapCoordinator.class, "done");
 
 		volatile Subscription s;
 		@SuppressWarnings("rawtypes")
-		static final AtomicReferenceFieldUpdater<UntilOtherFromCoordinator, Subscription> S =
-				AtomicReferenceFieldUpdater.newUpdater(UntilOtherFromCoordinator.class, Subscription.class, "s");
+		static final AtomicReferenceFieldUpdater<UntilOtherMapCoordinator, Subscription> S =
+				AtomicReferenceFieldUpdater.newUpdater(UntilOtherMapCoordinator.class, Subscription.class, "s");
 
-		UntilOtherFromTrigger[] triggerSubscribers;
+		UntilOtherMapTrigger[] triggerSubscribers;
 
-		UntilOtherFromCoordinator(Subscriber<? super T> subscriber,
+		UntilOtherMapCoordinator(Subscriber<? super T> subscriber,
 				boolean delayError,
 				Function<? super T, ? extends Publisher<?>>[] otherGenerators) {
 			super(subscriber);
@@ -161,12 +161,12 @@ final class MonoUntilOtherFrom<T> extends Mono<T> {
 		}
 
 		private void subscribeTriggers(T value) {
-			triggerSubscribers = new UntilOtherFromTrigger[otherGenerators.length];
+			triggerSubscribers = new UntilOtherMapTrigger[otherGenerators.length];
 			for (int i = 0; i < otherGenerators.length; i++) {
 				Function<? super T, ? extends Publisher<?>> generator = otherGenerators[i];
 				Publisher<?> p = generator.apply(value);
 				boolean cancelOnTriggerValue = !(p instanceof Mono);
-				UntilOtherFromTrigger triggerSubscriber = new UntilOtherFromTrigger(this, cancelOnTriggerValue);
+				UntilOtherMapTrigger triggerSubscriber = new UntilOtherMapTrigger(this, cancelOnTriggerValue);
 
 				this.triggerSubscribers[i] = triggerSubscriber;
 				p.subscribe(triggerSubscriber);
@@ -195,7 +195,7 @@ final class MonoUntilOtherFrom<T> extends Mono<T> {
 
 			//check for errors in the triggers
 			for (int i = 0; i < n; i++) {
-				UntilOtherFromTrigger mt = triggerSubscribers[i];
+				UntilOtherMapTrigger mt = triggerSubscribers[i];
 				Throwable e = mt.error;
 				if (e != null) {
 					if (compositeError != null) {
@@ -231,27 +231,27 @@ final class MonoUntilOtherFrom<T> extends Mono<T> {
 				Operators.terminate(S, this);
 				//...but triggerSubscribers could be partially initialized
 				for (int i = 0; i < triggerSubscribers.length; i++) {
-					UntilOtherFromTrigger ts = triggerSubscribers[i];
+					UntilOtherMapTrigger ts = triggerSubscribers[i];
 					if (ts != null) ts.cancel();
 				}
 			}
 		}
 	}
 
-	static final class UntilOtherFromTrigger<T> implements InnerConsumer<T> {
+	static final class UntilOtherMapTrigger<T> implements InnerConsumer<T> {
 
-		final UntilOtherFromCoordinator<?> parent;
-		final boolean                      cancelOnTriggerValue;
+		final UntilOtherMapCoordinator<?> parent;
+		final boolean                     cancelOnTriggerValue;
 
 		volatile Subscription s;
 		@SuppressWarnings("rawtypes")
-		static final AtomicReferenceFieldUpdater<UntilOtherFromTrigger, Subscription> S =
-				AtomicReferenceFieldUpdater.newUpdater(UntilOtherFromTrigger.class, Subscription.class, "s");
+		static final AtomicReferenceFieldUpdater<UntilOtherMapTrigger, Subscription> S =
+				AtomicReferenceFieldUpdater.newUpdater(UntilOtherMapTrigger.class, Subscription.class, "s");
 
 		boolean done;
 		Throwable error;
 
-		UntilOtherFromTrigger(UntilOtherFromCoordinator<?> parent,
+		UntilOtherMapTrigger(UntilOtherMapCoordinator<?> parent,
 				boolean cancelOnTriggerValue) {
 			this.parent = parent;
 			this.cancelOnTriggerValue = cancelOnTriggerValue;

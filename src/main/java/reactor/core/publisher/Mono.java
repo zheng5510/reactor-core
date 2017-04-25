@@ -3047,7 +3047,7 @@ public abstract class Mono<T> implements Publisher<T> {
 	 * emitted, generates a trigger Publisher and then delays again until the trigger
 	 * Publisher emits for the first time (or terminates empty).
 	 * <p>
-	 * Subsequent calls to {@link #untilOtherFrom(Function) this operator} are
+	 * Subsequent calls to {@link #untilOtherMap(Function) this operator} are
 	 * fused together (the triggers are generated and subscribed to together, when the
 	 * value is emitted).
 	 *
@@ -3056,12 +3056,12 @@ public abstract class Mono<T> implements Publisher<T> {
 	 *
 	 * @return this Mono, but delayed until the derived publisher first emits or terminates.
 	 */
-	public Mono<T> untilOtherFrom(Function<? super T, ? extends Publisher<?>> triggerProvider) {
+	public Mono<T> untilOtherMap(Function<? super T, ? extends Publisher<?>> triggerProvider) {
 		Objects.requireNonNull(triggerProvider, "triggerProvider required");
-		if (this instanceof MonoUntilOtherFrom) {
-			return ((MonoUntilOtherFrom<T>) this).addTriggerGenerator(triggerProvider);
+		if (this instanceof MonoUntilOtherMap) {
+			return ((MonoUntilOtherMap<T>) this).addTriggerGenerator(triggerProvider);
 		}
-		return onAssembly(new MonoUntilOtherFrom<>(false, this, triggerProvider));
+		return onAssembly(new MonoUntilOtherMap<>(false, this, triggerProvider));
 	}
 
 	/**
@@ -3072,7 +3072,7 @@ public abstract class Mono<T> implements Publisher<T> {
 	 * emitted, generates a trigger {@link Publisher} and then delays again until
 	 * the trigger Publisher emits for the first time (or terminates empty).
 	 * <p>
-	 * Subsequent calls to {@link #untilOtherFromDelayError(Function) this operator} are
+	 * Subsequent calls to {@link #untilOtherMapDelayError(Function) this operator} are
 	 * fused together (the triggers are generated and subscribed to together, when the
 	 * value is emitted). In case one of the triggers errors, that error is delayed until
 	 * all publishers have triggered, and multiple errors are thus combined into one.
@@ -3082,12 +3082,12 @@ public abstract class Mono<T> implements Publisher<T> {
 	 *
 	 * @return this Mono, but delayed until the derived publisher first emits or terminates.
 	 */
-	public Mono<T> untilOtherFromDelayError(Function<? super T, ? extends Publisher<?>> triggerProvider) {
+	public Mono<T> untilOtherMapDelayError(Function<? super T, ? extends Publisher<?>> triggerProvider) {
 		Objects.requireNonNull(triggerProvider, "triggerProvider required");
-		if (this instanceof MonoUntilOtherFrom) {
-			return ((MonoUntilOtherFrom<T>) this).addTriggerGenerator(triggerProvider);
+		if (this instanceof MonoUntilOtherMap) {
+			return ((MonoUntilOtherMap<T>) this).addTriggerGenerator(triggerProvider);
 		}
-		return onAssembly(new MonoUntilOtherFrom<>(true, this, triggerProvider));
+		return onAssembly(new MonoUntilOtherMap<>(true, this, triggerProvider));
 	}
 
 	/**
