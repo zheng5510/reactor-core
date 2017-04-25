@@ -2797,9 +2797,21 @@ public abstract class Flux<T> implements Publisher<T> {
 	}
 
 	/**
-	 * Transform the elements emitted by this {@link Flux} asynchronously yet preserving
-	 * source ordering. Unlike {@link #flatMap(Function) flatMap}, subscription is done
-	 * by concatenating inner publishers instead of merging (no interleave).
+	 * Transform the elements emitted by this {@link Flux} asynchronously into Publishers,
+	 * then flatten these inner publishers into a single {@link Flux}.
+	 * <p>
+	 * Like {@link #flatMap(Function) flatMap} and {@link #flatMapSequential(Function) flatMapSequential},
+	 * there are two dimensions to this:
+	 * <ul>
+	 *     <li>Generation of inners and subscription: this operator waits for one
+	 *     inner to complete before generating the next one and subscribing to it.</li>
+	 *     <li>Ordering of the flattened values: this operator naturally preserves
+	 *     the same order as the source elements, concatenating the inners from each source
+	 *     element sequentially.</li>
+	 *     <li>Interleaving: this operator does not let values from different inners
+	 *     interleave (concatenation).</li>
+	 * </ul>
+	 *
 	 * Errors will immediately short circuit current concat backlog.
 	 *
 	 * <p>
@@ -3535,8 +3547,19 @@ public abstract class Flux<T> implements Publisher<T> {
 	}
 
 	/**
-	 * Transform the item emitted by this {@link Flux} into Publishers, then flatten the emissions from those by
-	 * merging them into a single {@link Flux}, so that they may interleave.
+	 * Transform the elements emitted by this {@link Flux} asynchronously into Publishers,
+	 * then flatten these inner publishers into a single {@link Flux}.
+	 * <p>
+	 * Like {@link #flatMapSequential(Function) flatMapSequential} and {@link #concatMap(Function) concatMap},
+	 * there are three dimensions to this:
+	 * <ul>
+	 *     <li>Generation of inners and subscription: this operator is eagerly
+	 *     subscribing to its inners.</li>
+	 *     <li>Ordering of the flattened values: this operator does not necessarily preserve
+	 *     original ordering, as inner element are flattened as they arrive.</li>
+	 *     <li>Interleaving: this operator lets values from different inners interleave
+	 *     (similar to merging the inner sequences).</li>
+	 * </ul>
 	 * <p>
 	 * <img class="marble" src="https://raw.githubusercontent.com/reactor/reactor-core/v3.0.6.RELEASE/src/docs/marble/flatmap.png" alt="">
 	 * <p>
@@ -3684,11 +3707,27 @@ public abstract class Flux<T> implements Publisher<T> {
 	}
 
 	/**
-	 * Transform the items emitted by this {@link Flux} into Publishers, then flatten the
-	 * emissions from those by merging them into a single {@link Flux}, in order.
-	 * Unlike {@link #concatMap(Function) concatMap}, transformed inner Publishers are
-	 * subscribed to eagerly. Unlike {@link #flatMap(Function) flatMap}, their emitted
-	 * elements are merged respecting the order of the original sequence.
+	 * Transform the elements emitted by this {@link Flux} asynchronously into Publishers,
+	 * then flatten these inner publishers into a single {@link Flux}.
+	 * <p>
+	 * Like {@link #flatMap(Function) flatMap} and {@link #concatMap(Function) concatMap},
+	 * there are two dimensions to this:
+	 * <ul>
+	 *     <li>Generation of inners and subscription: this operator is eagerly
+	 *     subscribing to its inners (like flatMap).</li>
+	 *     <li>Ordering of the flattened values: this operator queues elements from
+	 *     late inners until all elements from earlier inners have been emitted, thus emitting
+	 *     inner sequences as a whole, in an order that matches their source's order.</li>
+	 *     <li>Interleaving: this operator does not let values from different inners
+	 *     interleave (similar looking result to concatMap, but due to queueing of values
+	 *     that would have been interleaved otherwise).</li>
+	 * </ul>
+	 *
+	 * <p>
+	 * That is to say, whenever a source element is emitted it is transformed to an inner
+	 * {@link Publisher}. However, if such an early inner takes more time to complete than
+	 * subsequent faster inners, the data from these faster inners will be queued until
+	 * the earlier inner completes, so as to maintain source ordering.
 	 *
 	 * <p>
 	 * <img class="marble" src="https://raw.githubusercontent.com/reactor/reactor-core/v3.0.6.RELEASE/src/docs/marble/flatmapsequential.png" alt="">
